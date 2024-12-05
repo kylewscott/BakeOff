@@ -226,7 +226,6 @@ int try_acquire_ingredients(Baker* baker, Recipe recipe)
     
     for(int i = 0; recipe_ingredients[recipe][i] != -1; i++)
     {  
-        // Figure out why calling the interrupt crashes the program when it goes to run the loop from the start
         int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 5 == 0); 
         if (ramsay_trigger)
         {
