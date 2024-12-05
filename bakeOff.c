@@ -46,6 +46,12 @@ char* recipe_names[] =
     "Cinnamon Rolls"
 };
 
+char* ingredient_names[] =
+{
+    "Flour","Sugar", "Yeast", "Baking Soda", "Salt", "Cinnamon",
+    "Egg", "Milk", "Butter"
+};
+
 // Ingredient requirements for each recipe
 Ingredient recipe_ingredients[][8] = 
 {
@@ -81,6 +87,9 @@ typedef struct
     char* color;
     KitchenResources* kitchen;
 } Baker;
+
+// Track if ramsied has occured yet
+int ramsay_triggered = 0;
 
 // Global kitchen resources
 KitchenResources kitchen;
@@ -123,21 +132,10 @@ void initialize_kitchen(int num_bakers)
 void* baker_thread(void* arg) 
 {
 	Baker* baker = (Baker*)arg;
-    int ramsay_triggered = 0; //Keep track if baker has already been ramsied
     
     // Attempt each recipe
     for (Recipe recipe = 0; recipe < RECIPE_COUNT; recipe++) 
 	{
-       	int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 3 == 0);
-       
-       	if (ramsay_trigger) 
-    	{
-			ramsay_interrupt(baker);
-            ramsay_triggered = 1;
-            continue;
-        }
-
-
         // Try to acquire ingredients
         printf("%sBaker %d is attempting to make %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
         
@@ -162,8 +160,12 @@ void ramsay_interrupt(Baker* baker)
 	// Release all currently held semaphores
     for (int i = 0; i < INGREDIENT_COUNT; i++)
 	{
-       	sem_post(&kitchen.ingredient_locks[i]);
-    }
+        if (kitchen.ingredient_available[i] == 0)
+        {
+            kitchen.ingredient_available[i]++;
+       	    sem_post(&kitchen.ingredient_locks[i]);
+        }
+     }
     
 	sem_post(&kitchen.pantry);
     sem_post(&kitchen.refrigerators[0]);
@@ -219,9 +221,22 @@ int main()
 int try_acquire_ingredients(Baker* baker, Recipe recipe) 
 {
     printf("%sBaker %d is trying to aquire ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
+
+    srand(time(NULL));
     
     for(int i = 0; recipe_ingredients[recipe][i] != -1; i++)
-    {
+    {  
+        // Figure out why calling the interrupt crashes the program when it goes to run the loop from the start
+        int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 5 == 0); 
+        if (ramsay_trigger)
+        {
+            ramsay_interrupt(baker);
+            ramsay_triggered = 1;
+            i = -1;
+            printf("%sBaker %d has dropped all ingredients and is restarting%s\n", baker->color, baker->id, RESET);
+            continue;
+        }        
+
         Ingredient ingredient = recipe_ingredients[recipe][i];
         sem_wait(&kitchen.ingredient_locks[ingredient]);
         
@@ -231,7 +246,7 @@ int try_acquire_ingredients(Baker* baker, Recipe recipe)
             sem_wait(&kitchen.ingredient_locks[ingredient]);
         }
 
-        printf("%sBaker %d has gathered ingredient %d%s\n", baker->color, baker->id, ingredient, RESET);
+        printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
 
         kitchen.ingredient_available[ingredient]--;
         sem_post(&kitchen.ingredient_locks[ingredient]);
