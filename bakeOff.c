@@ -97,10 +97,10 @@ KitchenResources kitchen;
 // Function prototypes
 void initialize_kitchen(int num_bakers);
 void* baker_thread(void* arg);
-int try_acquire_ingredients(Baker* baker, Recipe recipe);
+int acquire_ingredients(Baker* baker, Recipe recipe);
 void release_ingredients(Baker* baker, Recipe recipe);
-void mix_ingredients(Baker* baker, Recipe recipe);
-void bake_recipe(Baker* baker, Recipe recipe);
+int mix_ingredients(Baker* baker, Recipe recipe);
+int bake_recipe(Baker* baker, Recipe recipe);
 void ramsay_interrupt(Baker* baker);
 
 // Initialize kitchen resources
@@ -135,18 +135,21 @@ void* baker_thread(void* arg)
     
     // Attempt each recipe
     for (Recipe recipe = 0; recipe < RECIPE_COUNT; recipe++) 
-	{
-        // Try to acquire ingredients
-        printf("%sBaker %d is attempting to make %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
-        
-        if (try_acquire_ingredients(baker, recipe)) 
-		{
-			mix_ingredients(baker, recipe);
-            release_ingredients(baker, recipe);
-            bake_recipe(baker, recipe);
-            
-            printf("%sBaker %d completed %s%s\n", 
-            baker->color, baker->id, recipe_names[recipe], RESET);
+	{   
+        while(1)
+        {
+            printf("%sBaker %d is attempting to make %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
+            if (acquire_ingredients(baker, recipe)) 
+		    {
+                if(mix_ingredients(baker, recipe))
+                {
+                    release_ingredients(baker, recipe);
+                    if(bake_recipe(baker, recipe))
+                    {
+                        break;
+                    }
+                }
+            }
         }
     }
     return NULL;
@@ -156,7 +159,8 @@ void* baker_thread(void* arg)
 void ramsay_interrupt(Baker* baker) 
 {
 	printf("%s**GORDON RAMSAY INTERRUPTION FOR BAKER %d!**%s\n", baker->color, baker->id, RESET);
-    
+    printf("%sBaker %d has dropped everything and is restarting%s\n", baker->color, baker->id, RESET);
+
 	// Release all currently held semaphores
     for (int i = 0; i < INGREDIENT_COUNT; i++)
 	{
@@ -218,7 +222,7 @@ int main()
    	return 0;
 }
 
-int try_acquire_ingredients(Baker* baker, Recipe recipe) 
+int acquire_ingredients(Baker* baker, Recipe recipe) 
 {
     printf("%sBaker %d is trying to aquire ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
 
@@ -232,9 +236,7 @@ int try_acquire_ingredients(Baker* baker, Recipe recipe)
         {
             ramsay_interrupt(baker);
             ramsay_triggered = 1;
-            i = -1;
-            printf("%sBaker %d has dropped all ingredients and is restarting%s\n", baker->color, baker->id, RESET);
-            continue;
+            return 0;
         }        
 
         Ingredient ingredient = recipe_ingredients[recipe][i];
@@ -258,7 +260,7 @@ int try_acquire_ingredients(Baker* baker, Recipe recipe)
 
 void release_ingredients(Baker* baker, Recipe recipe) 
 {
-    printf("%sBaker %d is trying to release all ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
+    printf("%sBaker %d is releasing all ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
 
 	for(int i = 0; recipe_ingredients[recipe][i] != -1; i++) 
     {
@@ -267,16 +269,24 @@ void release_ingredients(Baker* baker, Recipe recipe)
         kitchen.ingredient_available[ingredient]++;
         sem_post(&kitchen.ingredient_locks[ingredient]);
     }
-
-    printf("%sBaker %d has released all ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
 }
 
-void mix_ingredients(Baker* baker, Recipe recipe) 
+int mix_ingredients(Baker* baker, Recipe recipe) 
 {
+    printf("%sBaker %d is trying to gather all mixing tools%s\n", baker->color, baker->id, RESET);
+    
 	// Acquire mixer, bowl, and spoon
     sem_wait(&kitchen.mixers);
     sem_wait(&kitchen.bowls);
    	sem_wait(&kitchen.spoons);
+
+    int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 5 == 0);
+    if (ramsay_trigger)
+    {
+        ramsay_interrupt(baker);
+        ramsay_triggered = 1;
+        return 0;
+    }
 
    	printf("%sBaker %d is mixing ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
     
@@ -286,17 +296,37 @@ void mix_ingredients(Baker* baker, Recipe recipe)
    	sem_post(&kitchen.mixers);
    	sem_post(&kitchen.bowls);
    	sem_post(&kitchen.spoons);
+
+    printf("%sBaker %d has mixed ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
+
+    return 1;
 }
 
-void bake_recipe(Baker* baker, Recipe recipe) 
+int bake_recipe(Baker* baker, Recipe recipe) 
 {
+    printf("%sBaker %d is trying to use the oven %s\n", baker->color, baker->id, RESET);
+    
 	// Acquire oven
    	sem_wait(&kitchen.ovens);
+
+    int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 5 == 0);
+    if (ramsay_trigger) 
+    {
+        printf("%s**GORDON RAMSAY INTERRUPTION FOR BAKER %d!**%s\n", baker->color, baker->id, RESET);
+        sem_post(&kitchen.ovens);
+        printf("%sBaker %d has dropped everything and is restarting%s\n", baker->color, baker->id, RESET);
+        ramsay_triggered = 1;
+        return 0;
+    }
 
    	printf("%sBaker %d is baking %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
     
    	sleep(2);  // Simulate baking time
 
+    printf("%sBaker %d completed %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
+
    	// Release oven
    	sem_post(&kitchen.ovens);
+
+    return 1;
 }
