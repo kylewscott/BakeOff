@@ -37,6 +37,16 @@ typedef enum
     RECIPE_COUNT
 } Recipe;
 
+Ingredient pantry_ingredients[] = 
+{
+    FLOUR, SUGAR, YEAST, BAKING_SODA, SALT, CINNAMON
+};
+
+Ingredient fridge_ingredients[] =
+{
+    EGG, MILK, BUTTER
+};
+
 char* recipe_names[] =
 {
     "Cookies",
@@ -239,18 +249,51 @@ int acquire_ingredients(Baker* baker, Recipe recipe)
         }        
 
         Ingredient ingredient = recipe_ingredients[recipe][i];
-        sem_wait(&kitchen.ingredient_locks[ingredient]);
-        
-        while(kitchen.ingredient_available[ingredient] == 0) 
+
+        for(int j = 0; j < 6; j++)
         {
-            sem_post(&kitchen.ingredient_locks[ingredient]);
-            sem_wait(&kitchen.ingredient_locks[ingredient]);
+            if(ingredient == pantry_ingredients[j])
+            {
+                printf("%sBaker %d is entering the pantry %s\n", baker->color, baker->id, RESET);
+  
+                sem_wait(&kitchen.pantry);
+                sem_wait(&kitchen.ingredient_locks[ingredient]);
+
+                while(kitchen.ingredient_available[ingredient] == 0) 
+                {
+                    sem_post(&kitchen.ingredient_locks[ingredient]);
+                    sem_wait(&kitchen.ingredient_locks[ingredient]);
+                }
+
+                printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
+
+                sem_post(&kitchen.pantry);
+                kitchen.ingredient_available[ingredient]--;
+                sem_post(&kitchen.ingredient_locks[ingredient]);
+            }
         }
+        for(int n = 0; n < 3; n++)
+        {
+            if(ingredient == fridge_ingredients[n])
+            {
+                printf("%sBaker %d is entering the fridge %s\n", baker->color, baker->id, RESET);
 
-        printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
+                sem_wait(&kitchen.refrigerators[0]);
+                sem_wait(&kitchen.ingredient_locks[ingredient]);
 
-        kitchen.ingredient_available[ingredient]--;
-        sem_post(&kitchen.ingredient_locks[ingredient]);
+                while(kitchen.ingredient_available[ingredient] == 0)
+                {
+                    sem_post(&kitchen.ingredient_locks[ingredient]);
+                    sem_wait(&kitchen.ingredient_locks[ingredient]);
+                }
+        
+                printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
+
+                sem_post(&kitchen.refrigerators[0]);
+                kitchen.ingredient_available[ingredient]--;
+                sem_post(&kitchen.ingredient_locks[ingredient]);
+            }
+        }
     }
 
     printf("%sBaker %d has aquired all ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
