@@ -39,12 +39,12 @@ typedef enum
 
 Ingredient pantry_ingredients[] = 
 {
-    FLOUR, SUGAR, YEAST, BAKING_SODA, SALT, CINNAMON
+    FLOUR, SUGAR, YEAST, BAKING_SODA, SALT, CINNAMON, -1
 };
 
 Ingredient fridge_ingredients[] =
 {
-    EGG, MILK, BUTTER
+    EGG, MILK, BUTTER, -1
 };
 
 char* recipe_names[] =
@@ -232,12 +232,51 @@ int main()
     return 0;
 }
 
-int acquire_ingredients(Baker* baker, Recipe recipe) 
+int check_pantry(Baker* baker, Recipe recipe)
 {
-    printf("%sBaker %d is trying to aquire ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
-
     srand(time(NULL));
+
+    printf("%sBaker %d is entering the pantry %s\n", baker->color, baker->id, RESET);
+
+    for(int i = 0; recipe_ingredients[recipe][i] != -1; i++)
+    {
+        int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 5 == 0);
+        if (ramsay_trigger)
+        {
+            ramsay_interrupt(baker);
+            ramsay_triggered = 1;
+            return 0;
+        }
+ 
+        Ingredient ingredient = recipe_ingredients[recipe][i];
+
+        for(int j = 0; pantry_ingredients[j] != -1; j++)
+        {
+            if(ingredient == pantry_ingredients[j])
+            {
+                sem_wait(&kitchen.ingredient_locks[ingredient]);
+ 
+                while(kitchen.ingredient_available[ingredient] == 0)
+                {
+                    sem_post(&kitchen.ingredient_locks[ingredient]);
+                    sem_wait(&kitchen.ingredient_locks[ingredient]);
+                }
+ 
+                printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
+ 
+                kitchen.ingredient_available[ingredient]--;
+                sem_post(&kitchen.ingredient_locks[ingredient]);
+            }   
+        }
+    }
     
+    return 1;
+}
+
+int check_fridge(Baker* baker, Recipe recipe)
+{
+    srand(time(NULL));
+
     for(int i = 0; recipe_ingredients[recipe][i] != -1; i++)
     {  
         int ramsay_trigger = (!ramsay_triggered) && (baker->id == kitchen.ramsay_target) && (rand() % 5 == 0); 
@@ -250,52 +289,116 @@ int acquire_ingredients(Baker* baker, Recipe recipe)
 
         Ingredient ingredient = recipe_ingredients[recipe][i];
 
-        for(int j = 0; j < 6; j++)
-        {
-            if(ingredient == pantry_ingredients[j])
-            {
-                printf("%sBaker %d is entering the pantry %s\n", baker->color, baker->id, RESET);
-  
-                sem_wait(&kitchen.pantry);
-                sem_wait(&kitchen.ingredient_locks[ingredient]);
-
-                while(kitchen.ingredient_available[ingredient] == 0) 
-                {
-                    sem_post(&kitchen.ingredient_locks[ingredient]);
-                    sem_wait(&kitchen.ingredient_locks[ingredient]);
-                }
-
-                printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
-
-                sem_post(&kitchen.pantry);
-                kitchen.ingredient_available[ingredient]--;
-                sem_post(&kitchen.ingredient_locks[ingredient]);
-            }
-        }
-        for(int n = 0; n < 3; n++)
+        for(int n = 0; fridge_ingredients[n] != -1; n++)    
         {
             if(ingredient == fridge_ingredients[n])
             {
-                printf("%sBaker %d is entering the fridge %s\n", baker->color, baker->id, RESET);
-
-                sem_wait(&kitchen.refrigerators[0]);
                 sem_wait(&kitchen.ingredient_locks[ingredient]);
-
+ 
                 while(kitchen.ingredient_available[ingredient] == 0)
                 {
                     sem_post(&kitchen.ingredient_locks[ingredient]);
                     sem_wait(&kitchen.ingredient_locks[ingredient]);
                 }
-        
+ 
                 printf("%sBaker %d has gathered %s%s\n", baker->color, baker->id, ingredient_names[ingredient], RESET);
-
-                sem_post(&kitchen.refrigerators[0]);
+ 
                 kitchen.ingredient_available[ingredient]--;
                 sem_post(&kitchen.ingredient_locks[ingredient]);
             }
         }
     }
 
+    return 1;
+}
+
+int acquire_ingredients(Baker* baker, Recipe recipe) 
+{
+    printf("%sBaker %d is trying to aquire ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
+    
+    if(sem_trywait(&kitchen.pantry) == 0)
+    {
+        if(!check_pantry(baker, recipe))
+        {
+            return 0;
+        }
+
+        printf("%sBaker %d is leaving the pantry%s\n", baker->color, baker->id, RESET);
+
+        sem_post(&kitchen.pantry);        
+
+        if(sem_trywait(&kitchen.refrigerators[0]) == 0)
+        {
+            printf("%sBaker %d is entering fridge 0%s\n", baker->color, baker->id, RESET);
+
+            if(!check_fridge(baker, recipe))
+            {
+                return 0;   
+            }
+
+            printf("%sBaker %d is leaving fridge 0%s\n", baker->color, baker->id, RESET);
+
+            sem_post(&kitchen.refrigerators[0]);
+        }
+
+        else{
+            printf("%sBaker %d is entering fridge 1%s\n", baker->color, baker->id, RESET);
+    
+            sem_wait(&kitchen.refrigerators[1]);
+
+            if(!check_fridge(baker, recipe))
+            {
+                return 0;
+            }
+
+            printf("%sBaker %d is leaving fridge 1%s\n", baker->color, baker->id, RESET);
+
+            sem_post(&kitchen.refrigerators[1]);
+        } 
+    }
+
+    else{
+        if (sem_trywait(&kitchen.refrigerators[0]) == 0) 
+        {
+            printf("%sBaker %d is entering fridge 0%s\n", baker->color, baker->id, RESET);
+    
+            if(!check_fridge(baker, recipe))
+            {
+                return 0;
+            }
+    
+            printf("%sBaker %d is leaving fridge 0%s\n", baker->color, baker->id, RESET);
+
+            sem_post(&kitchen.refrigerators[0]);
+        } 
+        else 
+        {
+            sem_wait(&kitchen.refrigerators[1]);
+
+            printf("%sBaker %d is entering fridge 1%s\n", baker->color, baker->id, RESET);
+    
+            if(!check_fridge(baker, recipe))
+            {
+                return 0;
+            }
+    
+            printf("%sBaker %d is leaving fridge 1%s\n", baker->color, baker->id, RESET);
+
+            sem_post(&kitchen.refrigerators[1]);
+        }
+ 
+        sem_wait(&kitchen.pantry);
+    
+        if(!check_pantry(baker, recipe))
+        {
+            return 0; 
+        } 
+
+        printf("%sBaker %d is leaving the pantry %s\n", baker->color, baker->id, RESET);
+        
+        sem_post(&kitchen.pantry);
+    }
+           
     printf("%sBaker %d has aquired all ingredients for %s%s\n", baker->color, baker->id, recipe_names[recipe], RESET);
     return 1;
 }
